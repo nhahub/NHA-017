@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Egypt Real Estate AI Assistant</title>
+
+    <!-- Tailwind -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        .chat-box::-webkit-scrollbar {
+            width: 8px;
+        }
+        .chat-box::-webkit-scrollbar-track {
+            background: #1f2937;
+        }
+        .chat-box::-webkit-scrollbar-thumb {
+            background-color: #4b5563;
+            border-radius: 4px;
+            border: 2px solid #1f2937;
+        }
+
+        /* Recording animation */
+        .recording {
+            background-color: #dc2626 !important; /* Red */
+            box-shadow: 0 0 20px #dc2626;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-900 text-gray-100 flex flex-col items-center justify-center min-h-screen py-8 px-4 font-sans antialiased">
+
+    <div class="w-full max-w-4xl bg-gray-800 rounded-lg shadow-xl flex flex-col h-[90vh]">
+        <header class="p-6 border-b border-gray-700">
+            <h1 class="text-4xl font-extrabold text-blue-400 text-center">
+                Egypt Real Estate AI Assistant
+            </h1>
+            <p class="text-center text-gray-400 mt-2">
+                Ask about properties or get recommendations.
+            </p>
+        </header>
+
+        <!-- Chat Area -->
+        <div id="results" class="flex-grow overflow-y-auto chat-box p-6 space-y-4">
+            <div class="flex justify-start">
+                <div class="bg-gray-700 text-gray-200 rounded-xl p-4 shadow max-w-2xl">
+                    <p class="font-semibold text-blue-300 mb-1">AI Assistant</p>
+                    <p>Hello! I'm your Egypt Real Estate AI Assistant. How can I help you find your next property?</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="p-6 border-t border-gray-700 flex items-center space-x-4">
+
+            <!-- Text Input -->
+            <input type="text" id="prompt"
+                   placeholder="Describe your dream home or ask a question..."
+                   class="flex-grow p-4 text-lg bg-gray-700 border border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400 text-white">
+
+            <!-- Send Button -->
+            <button onclick="getRecommendation()" id="sendButton"
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl transition shadow-md disabled:opacity-50">
+                Send
+            </button>
+
+            <!-- Microphone Button -->
+            <button id="micBtn"
+                class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-4 rounded-full shadow-md transition">
+                🎤
+            </button>
+        </div>
+
+        <div id="statusMessage" class="text-center text-blue-400 text-sm pb-4 hidden">Processing...</div>
+        <div id="errorMessage" class="text-center text-red-400 text-sm pb-4 hidden"></div>
+    </div>
+
+    <script>
+        const promptInput = document.getElementById("prompt");
+        const resultsDiv = document.getElementById("results");
+        const sendButton = document.getElementById("sendButton");
+        const statusMessage = document.getElementById("statusMessage");
+        const errorMessage = document.getElementById("errorMessage");
+        const micBtn = document.getElementById("micBtn");
+
+        let recorder;
+        let chunks = [];
+        let isRecording = false;
+
+        function scrollToBottom() {
+            resultsDiv.scrollTop = resultsDiv.scrollHeight;
+        }
+
+        function displayUserMessage(text) {
+            const msg = `
+                <div class="flex justify-end">
+                    <div class="bg-blue-600 text-white rounded-xl p-4 shadow max-w-2xl">
+                        <p>${text}</p>
+                    </div>
+                </div>`;
+            resultsDiv.insertAdjacentHTML("beforeend", msg);
+            scrollToBottom();
+        }
+
+        function displayAIAssistantMessage(text) {
+            const msg = `
+                <div class="flex justify-start">
+                    <div class="bg-gray-700 text-gray-200 rounded-xl p-4 shadow max-w-2xl">
+                        <p class="font-semibold text-blue-300 mb-1">AI Assistant</p>
+                        <p>${text}</p>
+                    </div>
+                </div>`;
+            resultsDiv.insertAdjacentHTML("beforeend", msg);
+            scrollToBottom();
+        }
+
+        function displayPropertyCard(prop) {
+            const card = `
+                <div class="flex justify-start">
+                    <div class="bg-gray-700 text-gray-200 rounded-xl p-4 shadow max-w-2xl w-full">
+                        <h3 class="text-xl font-bold text-blue-300 mb-2">${prop.title || 'N/A'}</h3>
+                        <p><strong>Price:</strong> $${prop.price || 'N/A'}</p>
+                        <p><strong>Area:</strong> ${prop.area || 'N/A'} m²</p>
+                        <p><strong>Bedrooms:</strong> ${prop.bedrooms || 'N/A'}</p>
+                        <p><strong>Location:</strong> ${prop.location || 'N/A'}</p>
+                        ${prop.link ? `<a href="${prop.link}" target="_blank" class="text-blue-400 hover:underline mt-3 inline-block">View Listing →</a>` : ''}
+                    </div>
+                </div>`;
+            resultsDiv.insertAdjacentHTML("beforeend", card);
+            scrollToBottom();
+        }
+
+        /* ---------------------------------------- */
+        /* 🔴 MICROPHONE RECORDING + TRANSCRIBE     */
+        /* ---------------------------------------- */
+
+        micBtn.onclick = async () => {
+            if (!isRecording) {
+                startRecording();
+            } else {
+                stopRecording();
+            }
+        };
+
+        async function startRecording() {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            recorder = new MediaRecorder(stream);
+            chunks = [];
+
+            recorder.ondataavailable = e => chunks.push(e.data);
+            recorder.onstop = sendAudioToBackend;
+
+            isRecording = true;
+            micBtn.classList.add("recording");
+            micBtn.innerText = "⏹";
+        }
+
+        function stopRecording() {
+            isRecording = false;
+            micBtn.classList.remove("recording");
+            micBtn.innerText = "🎤";
+            recorder.stop();
+        }
+
+        async function sendAudioToBackend() {
+            const blob = new Blob(chunks, { type: "audio/wav" });
+            const formData = new FormData();
+            formData.append("audio", blob, "voice.wav");
+
+            const response = await fetch("/transcribe", {
+                method: "POST",
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (data.text) {
+                promptInput.value = data.text;
+                displayUserMessage(data.text);
+                getRecommendation();
+            }
+        }
+
+        /* ---------------------------------------- */
+        /* 🔵 SEND TEXT TO /recommend               */
+        /* ---------------------------------------- */
+
+        async function getRecommendation() {
+            const prompt = promptInput.value.trim();
+            if (!prompt) return;
+
+            promptInput.value = "";
+            displayUserMessage(prompt);
+
+            statusMessage.classList.remove('hidden');
+            sendButton.disabled = true;
+            promptInput.disabled = true;
+
+            try {
+                const res = await fetch("/recommend", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ prompt })
+                });
+
+                const data = await res.json();
+
+                if (data.raw_response) {
+                    displayAIAssistantMessage(data.raw_response);
+                }
+
+                if (data.recommendations) {
+                    data.recommendations.forEach(displayPropertyCard);
+                }
+
+            } catch {
+                displayAIAssistantMessage("An error occurred.");
+            } finally {
+                statusMessage.classList.add('hidden');
+                sendButton.disabled = false;
+                promptInput.disabled = false;
+                promptInput.focus();
+            }
+        }
+
+        sendButton.addEventListener("click", getRecommendation);
+        promptInput.addEventListener("keypress", e => {
+            if (e.key === "Enter") getRecommendation();
+        });
+
+        scrollToBottom();
+    </script>
+</body>
+</html>
